@@ -15,4 +15,4 @@ MODEL = "claude-sonnet-5-5"
 [[d1_databases]]
 binding = "DB"
 database_name = "gym-coach"
-database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"
+database_id = "4672d4e2-209f-4252-a733-18d92c9ec962"
