@@ -120,6 +120,9 @@ async function route(request, env, url) {
     }
   }
   if (pathname === "/api/stats" && method === "GET") return { lifts: await getStats(env) };
+  if (pathname === "/api/diag" && method === "GET") {
+    return { anthropic_key: describeKey(env.ANTHROPIC_API_KEY), model: env.MODEL || DEFAULT_MODEL };
+  }
 
   throw httpError(404, "not found");
 }
@@ -252,11 +255,24 @@ ${liftsText}`;
   return { system, user };
 }
 
+// Strip whitespace/newlines/quotes that often sneak in when pasting the secret.
+export function cleanKey(raw) {
+  return String(raw ?? "").trim().replace(/^["']|["']$/g, "").trim();
+}
+
+// Safe fingerprint of the key for diagnostics (never the full key).
+export function describeKey(raw) {
+  const k = cleanKey(raw);
+  if (!k) return "missing";
+  const kind = k.startsWith("sk-ant-api") ? "API key" : k.startsWith("sk-ant-oat") ? "OAuth/subscription token (not usable here)" : "unknown format";
+  return `${kind}, ${k.length} chars, starts "${k.slice(0, 12)}…", ends "…${k.slice(-4)}"`;
+}
+
 async function callClaude(env, system, user) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
-      "x-api-key": env.ANTHROPIC_API_KEY,
+      "x-api-key": cleanKey(env.ANTHROPIC_API_KEY),
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
     },
@@ -271,7 +287,8 @@ async function callClaude(env, system, user) {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw httpError(502, `Claude API error ${res.status}: ${text.slice(0, 300)}`);
+    const hint = res.status === 401 ? ` | Worker key: ${describeKey(env.ANTHROPIC_API_KEY)}` : "";
+    throw httpError(502, `Claude API error ${res.status}: ${text.slice(0, 300)}${hint}`);
   }
   const data = await res.json();
   const block = (data.content || []).find((b) => b.type === "tool_use");

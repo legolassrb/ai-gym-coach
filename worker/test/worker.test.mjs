@@ -108,6 +108,13 @@ assert.match(lastClaudeRequest.messages[0].content, /Bench Press: 8x62.5, 8x62.5
 assert.match(lastClaudeRequest.messages[0].content, /Session to plan: pull/);
 assert.match(lastClaudeRequest.messages[0].content, /2x 20kg dumbbells/);
 
+// key diagnostics + cleaning
+r = await call("GET", "/api/diag");
+assert.match(r.body.anthropic_key, /unknown format, 7 chars/);
+const { cleanKey, describeKey } = await import("../src/index.js");
+assert.equal(cleanKey(' "sk-ant-api03-abc"\n'), "sk-ant-api03-abc");
+assert.match(describeKey("sk-ant-oat01-xyz"), /OAuth/);
+
 // delete
 r = await call("DELETE", `/api/workouts/${planId}`);
 assert.equal((await call("GET", "/api/workouts")).body.workouts.length, 0);
