@@ -1,6 +1,6 @@
 // Caches the app shell so the PWA opens instantly and offline. API calls always go to the network.
-const CACHE = "gym-coach-v1";
-const SHELL = ["./", "index.html", "styles.css", "app.js", "manifest.json", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
+const CACHE = "gym-coach-v2";
+const SHELL = ["./", "index.html", "styles.css", "app.js", "sketches.js", "charts.js", "manifest.json", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:init": "wrangler d1 execute gym-coach --remote --file=schema.sql",
-    "db:init:local": "wrangler d1 execute gym-coach --local --file=schema.sql",
-    "test": "node --experimental-sqlite test/worker.test.mjs"
+    "db:init": "wrangler d1 migrations apply gym-coach --remote",
+    "db:init:local": "wrangler d1 migrations apply gym-coach --local",
+    "test": "node --experimental-sqlite test/worker.test.mjs",
+    "api": "scripts/api.sh",
+    "check": "scripts/check.sh",
+    "check:local": "scripts/check.sh --local"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

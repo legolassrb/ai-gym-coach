@@ -1,5 +1,5 @@
 // AI Gym Coach — Cloudflare Worker
-// Holds the Claude API key, stores workout history in D1, and asks Claude to plan sessions.
+// Holds the Claude API key, stores per-user workout history in D1, and asks Claude to plan sessions.
 
 export const SPLITS = {
   ppl: ["push", "pull", "legs"],
@@ -19,12 +19,22 @@ export const DEFAULT_SETTINGS = {
   notes: "",
 };
 
+// Movement patterns the frontend has a sketch for.
+export const MOVEMENTS = [
+  "squat", "hinge", "lunge", "horizontal_press", "vertical_press", "push_up", "horizontal_pull",
+  "vertical_pull", "curl", "triceps", "lateral_raise", "calf", "core", "carry", "cardio", "mobility",
+];
+
 const SETTINGS_KEYS = Object.keys(DEFAULT_SETTINGS);
 const DEFAULT_MODEL = "claude-sonnet-5-5";
+const SESSION_DAYS = 30;
+const PBKDF2_ITERATIONS = 100000; // Workers cap PBKDF2 at 100k iterations
+const DEFAULT_PLAN_DAILY_LIMIT = 20;
 
 const PLAN_TOOL = {
   name: "submit_workout_plan",
   description: "Return the planned training session in structured form.",
+  strict: true,
   input_schema: {
     type: "object",
     properties: {
@@ -39,6 +49,7 @@ const PLAN_TOOL = {
           type: "object",
           properties: {
             name: { type: "string", description: "Keep names identical to history for tracking" },
+            movement: { type: "string", enum: MOVEMENTS, description: "Closest movement pattern; picks the exercise sketch" },
             equipment: { type: "string" },
             sets: { type: "integer" },
             reps: { type: "string", description: "Target reps, e.g. '8-10' or '12' or '30s'" },
@@ -49,7 +60,8 @@ const PLAN_TOOL = {
             rest_seconds: { type: "integer" },
             notes: { type: "string" },
           },
-          required: ["name", "sets", "reps", "rest_seconds"],
+          required: ["name", "movement", "sets", "reps", "rest_seconds"],
+          additionalProperties: false,
         },
       },
       cooldown: { type: "string" },
@@ -59,6 +71,7 @@ const PLAN_TOOL = {
       },
     },
     required: ["title", "split_day", "location", "estimated_minutes", "exercises"],
+    additionalProperties: false,
   },
 };
 
@@ -69,8 +82,8 @@ export default {
     try {
       const url = new URL(request.url);
       if (url.pathname === "/api/health") return json({ ok: true }, 200, cors);
-      if (!authorized(request, env)) return json({ error: "unauthorized" }, 401, cors);
-      const body = await route(request, env, url);
+      const user = await currentUser(request, env);
+      const body = await route(request, env, url, user);
       return json(body, 200, cors);
     } catch (err) {
       const status = err.status || 500;
@@ -82,65 +95,192 @@ export default {
 
 // ---------- routing ----------
 
-async function route(request, env, url) {
+async function route(request, env, url, user) {
   const { pathname } = url;
   const method = request.method;
 
+  // public
+  if (pathname === "/api/auth/register" && method === "POST") return register(env, await readJson(request));
+  if (pathname === "/api/auth/login" && method === "POST") return login(env, await readJson(request));
+
+  if (!user) throw httpError(401, "unauthorized");
+
+  if (pathname === "/api/auth/logout" && method === "POST") {
+    await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256Hex(bearer(request))).run();
+    return { ok: true };
+  }
+  if (pathname === "/api/me" && method === "GET") return publicUser(user);
+
   if (pathname === "/api/settings") {
-    if (method === "GET") return getSettings(env);
-    if (method === "PUT") return saveSettings(env, await readJson(request));
+    if (method === "GET") return getSettings(env, user.id);
+    if (method === "PUT") return saveSettings(env, user.id, await readJson(request));
   }
   if (pathname === "/api/next" && method === "GET") {
-    return nextSplitDay(env, await getSettings(env));
+    return nextSplitDay(env, user.id, await getSettings(env, user.id));
   }
   if (pathname === "/api/plan" && method === "POST") {
-    return createPlan(env, await readJson(request));
+    return createPlan(env, user, await readJson(request));
   }
   if (pathname === "/api/workouts") {
     if (method === "GET") {
       const limit = clampInt(url.searchParams.get("limit"), 1, 200, 30);
-      return { workouts: await listWorkouts(env, limit) };
+      return { workouts: await listWorkouts(env, user.id, limit) };
     }
-    if (method === "POST") return saveWorkout(env, await readJson(request));
+    if (method === "POST") return saveWorkout(env, user.id, await readJson(request));
   }
   const m = pathname.match(/^\/api\/workouts\/(\d+)$/);
   if (m) {
     const id = Number(m[1]);
-    if (method === "GET") {
-      const w = await getWorkout(env, id);
-      if (!w) throw httpError(404, "workout not found");
-      return w;
-    }
+    const w = await getWorkout(env, id);
+    // users only see their own logs; admins can manage everyone's
+    if (!w || (w.user_id !== user.id && user.role !== "admin")) throw httpError(404, "workout not found");
+    if (method === "GET") return w;
     if (method === "DELETE") {
-      await env.DB.batch([
-        env.DB.prepare("DELETE FROM sets WHERE workout_id = ?").bind(id),
-        env.DB.prepare("DELETE FROM workouts WHERE id = ?").bind(id),
-      ]);
+      await deleteWorkouts(env, "id = ?", id);
       return { deleted: id };
     }
   }
-  if (pathname === "/api/stats" && method === "GET") return { lifts: await getStats(env) };
+  if (pathname === "/api/stats" && method === "GET") return { lifts: await getStats(env, user.id) };
+  if (pathname === "/api/progress" && method === "GET") {
+    return getProgress(env, user.id, url.searchParams.get("exercise"));
+  }
+
+  // admin
+  if (pathname.startsWith("/api/admin/") || pathname === "/api/diag") {
+    if (user.role !== "admin") throw httpError(403, "admin only");
+  }
   if (pathname === "/api/diag" && method === "GET") {
     return { anthropic_key: describeKey(env.ANTHROPIC_API_KEY), model: env.MODEL || DEFAULT_MODEL };
+  }
+  if (pathname === "/api/admin/users" && method === "GET") return { users: await listUsers(env) };
+  if (pathname === "/api/admin/workouts" && method === "GET") {
+    const limit = clampInt(url.searchParams.get("limit"), 1, 500, 100);
+    const userId = url.searchParams.get("user_id") ? Number(url.searchParams.get("user_id")) : null;
+    return { workouts: await listWorkouts(env, userId, limit) };
+  }
+  const um = pathname.match(/^\/api\/admin\/users\/(\d+)$/);
+  if (um) {
+    const id = Number(um[1]);
+    if (id === user.id) throw httpError(400, "you can't change or delete your own account here");
+    const target = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(id).first();
+    if (!target) throw httpError(404, "user not found");
+    if (method === "PUT") {
+      const { role } = await readJson(request);
+      if (!["user", "admin"].includes(role)) throw httpError(400, "role must be user or admin");
+      await env.DB.prepare("UPDATE users SET role = ? WHERE id = ?").bind(role, id).run();
+      return { id, role };
+    }
+    if (method === "DELETE") {
+      await deleteWorkouts(env, "user_id = ?", id);
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id),
+        env.DB.prepare("DELETE FROM user_settings WHERE user_id = ?").bind(id),
+        env.DB.prepare("DELETE FROM users WHERE id = ?").bind(id),
+      ]);
+      return { deleted: id };
+    }
   }
 
   throw httpError(404, "not found");
 }
 
+// ---------- accounts ----------
+
+function normUsername(v) {
+  const u = String(v ?? "").trim().toLowerCase();
+  if (!/^[a-z0-9_.-]{3,32}$/.test(u)) throw httpError(400, "username must be 3-32 characters: letters, digits, _ . -");
+  return u;
+}
+
+function publicUser(u) {
+  return { id: u.id, username: u.username, role: u.role };
+}
+
+async function register(env, body) {
+  const username = normUsername(body.username);
+  const password = String(body.password ?? "");
+  if (password.length < 8) throw httpError(400, "password must be at least 8 characters");
+  const adminCode = String(body.admin_code ?? "");
+  if (adminCode && !(env.APP_PASSPHRASE && timingSafeEqual(adminCode, env.APP_PASSPHRASE))) {
+    throw httpError(403, "wrong admin code");
+  }
+  const role = adminCode ? "admin" : "user";
+  if (await env.DB.prepare("SELECT id FROM users WHERE username = ?").bind(username).first()) {
+    throw httpError(409, "username is taken");
+  }
+  const res = await env.DB.prepare("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)")
+    .bind(username, await hashPassword(password), role)
+    .run();
+  const user = { id: res.meta.last_row_id, username, role };
+  if (role === "admin") await claimLegacyData(env, user.id);
+  return createSession(env, user);
+}
+
+// Data from the single-user version (no owner) goes to the first admin.
+async function claimLegacyData(env, userId) {
+  const { n } = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'").first();
+  if (n !== 1) return;
+  await env.DB.batch([
+    env.DB.prepare("UPDATE workouts SET user_id = ? WHERE user_id IS NULL").bind(userId),
+    env.DB.prepare("INSERT OR IGNORE INTO user_settings (user_id, data) SELECT ?, data FROM settings WHERE id = 1").bind(userId),
+  ]);
+}
+
+async function login(env, body) {
+  const username = String(body.username ?? "").trim().toLowerCase();
+  const password = String(body.password ?? "");
+  const row = await env.DB.prepare("SELECT * FROM users WHERE username = ?").bind(username).first();
+  // hash even for unknown users so response time doesn't reveal which usernames exist
+  const ok = row ? await verifyPassword(password, row.password_hash) : (await hashPassword(password), false);
+  if (!ok) throw httpError(401, "wrong username or password");
+  await env.DB.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();
+  return createSession(env, row);
+}
+
+async function createSession(env, user) {
+  const token = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  await env.DB.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, datetime('now', ?))")
+    .bind(await sha256Hex(token), user.id, `+${SESSION_DAYS} days`)
+    .run();
+  return { token, user: publicUser(user) };
+}
+
+async function currentUser(request, env) {
+  const token = bearer(request);
+  if (!token) return null;
+  return env.DB.prepare(
+    `SELECT u.id, u.username, u.role FROM sessions s JOIN users u ON u.id = s.user_id
+      WHERE s.token_hash = ? AND s.expires_at > datetime('now')`
+  )
+    .bind(await sha256Hex(token))
+    .first();
+}
+
+async function listUsers(env) {
+  const { results } = await env.DB.prepare(
+    `SELECT u.id, u.username, u.role, u.created_at,
+            COUNT(w.id) AS workouts, MAX(w.date) AS last_date
+       FROM users u LEFT JOIN workouts w ON w.user_id = u.id AND w.status = 'completed'
+      GROUP BY u.id
+      ORDER BY u.created_at, u.id`
+  ).all();
+  return results;
+}
+
 // ---------- settings ----------
 
-async function getSettings(env) {
-  const row = await env.DB.prepare("SELECT data FROM settings WHERE id = 1").first();
+async function getSettings(env, userId) {
+  const row = await env.DB.prepare("SELECT data FROM user_settings WHERE user_id = ?").bind(userId).first();
   const stored = row ? safeParse(row.data, {}) : {};
   return sanitizeSettings({ ...DEFAULT_SETTINGS, ...stored });
 }
 
-async function saveSettings(env, body) {
-  const merged = sanitizeSettings({ ...(await getSettings(env)), ...body });
+async function saveSettings(env, userId, body) {
+  const merged = sanitizeSettings({ ...(await getSettings(env, userId)), ...body });
   await env.DB.prepare(
-    "INSERT INTO settings (id, data) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data"
+    "INSERT INTO user_settings (user_id, data) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET data = excluded.data"
   )
-    .bind(JSON.stringify(merged))
+    .bind(userId, JSON.stringify(merged))
     .run();
   return merged;
 }
@@ -160,11 +300,13 @@ export function sanitizeSettings(input) {
 
 // ---------- split rotation ----------
 
-export async function nextSplitDay(env, settings) {
+export async function nextSplitDay(env, userId, settings) {
   const rotation = SPLITS[settings.split];
   const last = await env.DB.prepare(
-    "SELECT split_day FROM workouts WHERE status = 'completed' ORDER BY date DESC, id DESC LIMIT 1"
-  ).first();
+    "SELECT split_day FROM workouts WHERE user_id = ? AND status = 'completed' ORDER BY date DESC, id DESC LIMIT 1"
+  )
+    .bind(userId)
+    .first();
   const lastDay = last?.split_day ?? null;
   const idx = rotation.indexOf(lastDay);
   const next = idx === -1 ? rotation[0] : rotation[(idx + 1) % rotation.length];
@@ -173,23 +315,34 @@ export async function nextSplitDay(env, settings) {
 
 // ---------- planning ----------
 
-async function createPlan(env, body) {
+async function createPlan(env, user, body) {
   if (!env.ANTHROPIC_API_KEY) throw httpError(500, "ANTHROPIC_API_KEY secret is not set");
+  // sign-up is open, so cap Claude calls per user
+  const limit = clampInt(env.PLAN_DAILY_LIMIT, 0, 1000, DEFAULT_PLAN_DAILY_LIMIT);
+  if (user.role !== "admin") {
+    const { n } = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM workouts WHERE user_id = ? AND plan_json IS NOT NULL AND created_at > datetime('now', '-1 day')"
+    )
+      .bind(user.id)
+      .first();
+    if (n >= limit) throw httpError(429, `daily limit of ${limit} plans reached, try again tomorrow`);
+  }
+
   const location = body.location === "home" ? "home" : "gym";
   const minutes = clampInt(body.minutes, 15, 180, 60);
   const date = isIsoDate(body.date) ? body.date : new Date().toISOString().slice(0, 10);
   const userNotes = String(body.notes ?? "").slice(0, 500);
 
-  const settings = await getSettings(env);
-  const next = await nextSplitDay(env, settings);
+  const settings = await getSettings(env, user.id);
+  const next = await nextSplitDay(env, user.id, settings);
   const splitDay =
     body.split_day && next.rotation.includes(body.split_day) ? body.split_day : next.next;
 
-  const history = await listWorkouts(env, 12);
-  const lifts = (await getStats(env)).slice(0, 40);
+  const history = await listWorkouts(env, user.id, 12);
+  const lifts = (await getStats(env, user.id)).slice(0, 40);
 
-  const { system, user } = buildPrompt({ settings, location, minutes, splitDay, userNotes, history, lifts, date });
-  const plan = await callClaude(env, system, user);
+  const { system, user: prompt } = buildPrompt({ settings, location, minutes, splitDay, userNotes, history, lifts, date });
+  const plan = await callClaude(env, system, prompt);
   plan.location = location;
   plan.split_day = splitDay;
 
@@ -199,9 +352,9 @@ async function createPlan(env, body) {
   ).run();
 
   const res = await env.DB.prepare(
-    "INSERT INTO workouts (date, location, split_day, status, plan_json) VALUES (?, ?, ?, 'planned', ?)"
+    "INSERT INTO workouts (user_id, date, location, split_day, status, plan_json) VALUES (?, ?, ?, ?, 'planned', ?)"
   )
-    .bind(date, location, splitDay, JSON.stringify(plan))
+    .bind(user.id, date, location, splitDay, JSON.stringify(plan))
     .run();
 
   return { id: res.meta.last_row_id, date, plan };
@@ -278,10 +431,12 @@ async function callClaude(env, system, user) {
     },
     body: JSON.stringify({
       model: env.MODEL || DEFAULT_MODEL,
-      max_tokens: 2500,
+      // room for adaptive thinking before the tool call
+      max_tokens: 16000,
       system,
       tools: [PLAN_TOOL],
-      tool_choice: { type: "tool", name: PLAN_TOOL.name },
+      // newer models reject forced tool_choice; the system prompt names the tool instead
+      tool_choice: { type: "auto" },
       messages: [{ role: "user", content: user }],
     }),
   });
@@ -298,7 +453,7 @@ async function callClaude(env, system, user) {
 
 // ---------- workouts ----------
 
-async function saveWorkout(env, body) {
+async function saveWorkout(env, userId, body) {
   const exercises = Array.isArray(body.exercises) ? body.exercises : [];
   const date = isIsoDate(body.date) ? body.date : new Date().toISOString().slice(0, 10);
   const location = body.location === "home" ? "home" : "gym";
@@ -308,7 +463,7 @@ async function saveWorkout(env, body) {
 
   let id = Number(body.id) || null;
   if (id) {
-    const exists = await env.DB.prepare("SELECT id FROM workouts WHERE id = ?").bind(id).first();
+    const exists = await env.DB.prepare("SELECT id FROM workouts WHERE id = ? AND user_id = ?").bind(id, userId).first();
     if (!exists) id = null;
   }
   if (id) {
@@ -320,9 +475,9 @@ async function saveWorkout(env, body) {
     await env.DB.prepare("DELETE FROM sets WHERE workout_id = ?").bind(id).run();
   } else {
     const res = await env.DB.prepare(
-      "INSERT INTO workouts (date, location, split_day, status, notes, duration_min) VALUES (?, ?, ?, 'completed', ?, ?)"
+      "INSERT INTO workouts (user_id, date, location, split_day, status, notes, duration_min) VALUES (?, ?, ?, ?, 'completed', ?, ?)"
     )
-      .bind(date, location, splitDay, notes, duration)
+      .bind(userId, date, location, splitDay, notes, duration)
       .run();
     id = res.meta.last_row_id;
   }
@@ -343,11 +498,14 @@ async function saveWorkout(env, body) {
   return getWorkout(env, id);
 }
 
-async function listWorkouts(env, limit) {
+// userId null = every user's workouts (admin view)
+async function listWorkouts(env, userId, limit) {
   const { results: rows } = await env.DB.prepare(
-    "SELECT * FROM workouts WHERE status = 'completed' ORDER BY date DESC, id DESC LIMIT ?"
+    `SELECT w.*, u.username FROM workouts w LEFT JOIN users u ON u.id = w.user_id
+      WHERE w.status = 'completed' AND (?1 IS NULL OR w.user_id = ?1)
+      ORDER BY w.date DESC, w.id DESC LIMIT ?2`
   )
-    .bind(limit)
+    .bind(userId, limit)
     .all();
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
@@ -360,12 +518,23 @@ async function listWorkouts(env, limit) {
 }
 
 async function getWorkout(env, id) {
-  const row = await env.DB.prepare("SELECT * FROM workouts WHERE id = ?").bind(id).first();
+  const row = await env.DB.prepare(
+    "SELECT w.*, u.username FROM workouts w LEFT JOIN users u ON u.id = w.user_id WHERE w.id = ?"
+  )
+    .bind(id)
+    .first();
   if (!row) return null;
   const { results: sets } = await env.DB.prepare("SELECT * FROM sets WHERE workout_id = ? ORDER BY id")
     .bind(id)
     .all();
   return shapeWorkout(row, sets);
+}
+
+async function deleteWorkouts(env, where, value) {
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM sets WHERE workout_id IN (SELECT id FROM workouts WHERE ${where})`).bind(value),
+    env.DB.prepare(`DELETE FROM workouts WHERE ${where}`).bind(value),
+  ]);
 }
 
 function shapeWorkout(row, sets) {
@@ -376,6 +545,8 @@ function shapeWorkout(row, sets) {
   }
   return {
     id: row.id,
+    user_id: row.user_id,
+    username: row.username ?? null,
     date: row.date,
     location: row.location,
     split_day: row.split_day,
@@ -387,7 +558,7 @@ function shapeWorkout(row, sets) {
   };
 }
 
-async function getStats(env) {
+async function getStats(env, userId) {
   const { results } = await env.DB.prepare(
     `SELECT s.exercise,
             MAX(s.weight) AS max_weight,
@@ -396,20 +567,92 @@ async function getStats(env) {
             COUNT(*) AS total_sets,
             MAX(w.date) AS last_date
        FROM sets s JOIN workouts w ON w.id = s.workout_id
-      WHERE w.status = 'completed'
+      WHERE w.status = 'completed' AND w.user_id = ?
       GROUP BY s.exercise
       ORDER BY last_date DESC, s.exercise`
-  ).all();
+  )
+    .bind(userId)
+    .all();
   return results;
+}
+
+// Totals, weekly volume and one exercise's per-session trend for the Progress page.
+async function getProgress(env, userId, exercise) {
+  const totals = await env.DB.prepare(
+    `SELECT COUNT(*) AS workouts, ROUND(AVG(duration_min)) AS avg_minutes, MIN(date) AS first_date
+       FROM workouts WHERE user_id = ? AND status = 'completed'`
+  )
+    .bind(userId)
+    .first();
+  // week = Monday of the workout's week
+  const { results: weekly } = await env.DB.prepare(
+    `SELECT date(w.date, 'weekday 0', '-6 days') AS week,
+            COUNT(DISTINCT w.id) AS workouts,
+            COUNT(s.id) AS sets,
+            ROUND(SUM(s.reps * COALESCE(s.weight, 0))) AS volume
+       FROM workouts w LEFT JOIN sets s ON s.workout_id = w.id
+      WHERE w.user_id = ? AND w.status = 'completed'
+      GROUP BY week ORDER BY week DESC LIMIT 52`
+  )
+    .bind(userId)
+    .all();
+  const lifts = await getStats(env, userId);
+  const name = exercise && lifts.some((l) => l.exercise === exercise) ? exercise : lifts[0]?.exercise ?? null;
+  let series = [];
+  if (name) {
+    ({ results: series } = await env.DB.prepare(
+      `SELECT w.date,
+              MAX(s.weight) AS top_weight,
+              ROUND(MAX(s.weight * (1 + s.reps / 30.0)), 1) AS est_1rm,
+              MAX(s.reps) AS best_reps
+         FROM sets s JOIN workouts w ON w.id = s.workout_id
+        WHERE w.user_id = ? AND w.status = 'completed' AND s.exercise = ?
+        GROUP BY w.date ORDER BY w.date`
+    )
+      .bind(userId, name)
+      .all());
+  }
+  const { units } = await getSettings(env, userId);
+  return { units, totals, weekly: weekly.reverse(), lifts, exercise: name, series };
 }
 
 // ---------- helpers ----------
 
-function authorized(request, env) {
-  if (!env.APP_PASSPHRASE) throw httpError(500, "APP_PASSPHRASE secret is not set");
+function bearer(request) {
   const header = request.headers.get("Authorization") || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  return timingSafeEqual(token, env.APP_PASSPHRASE);
+  return header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+}
+
+async function hashPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  return `pbkdf2$${PBKDF2_ITERATIONS}$${b64url(salt)}$${b64url(await pbkdf2(password, salt, PBKDF2_ITERATIONS))}`;
+}
+
+async function verifyPassword(password, stored) {
+  const [scheme, iter, salt, hash] = String(stored).split("$");
+  if (scheme !== "pbkdf2") return false;
+  const actual = b64url(await pbkdf2(password, b64urlDecode(salt), Number(iter)));
+  return timingSafeEqual(actual, hash);
+}
+
+async function pbkdf2(password, salt, iterations) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, 256);
+  return new Uint8Array(bits);
+}
+
+async function sha256Hex(s) {
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
+  return [...d].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function b64url(bytes) {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function b64urlDecode(s) {
+  const b = atob(String(s).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(b, (c) => c.charCodeAt(0));
 }
 
 function timingSafeEqual(a, b) {

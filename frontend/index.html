@@ -15,6 +15,14 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <!-- shared pencil filter for exercise sketches -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <filter id="pencil" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="7" result="noise" />
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.2" />
+    </filter>
+  </svg>
+
   <header class="topbar">
     <h1 id="title">Today</h1>
   </header>
@@ -28,9 +36,11 @@
 
   <div id="toast" class="toast hidden" role="alert"></div>
 
-  <nav class="tabbar">
+  <nav class="tabbar hidden">
     <button data-tab="today" class="active"><span class="ico">🏋️</span>Today</button>
-    <button data-tab="history"><span class="ico">📈</span>History</button>
+    <button data-tab="history"><span class="ico">🗓️</span>History</button>
+    <button data-tab="progress"><span class="ico">📈</span>Progress</button>
+    <button data-tab="admin" class="hidden"><span class="ico">🛡️</span>Admin</button>
     <button data-tab="settings"><span class="ico">⚙️</span>Settings</button>
   </nav>
 
