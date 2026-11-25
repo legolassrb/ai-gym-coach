@@ -1,18 +1,23 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="main">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0f1115" />
+  <meta name="theme-color" content="#0E0F11" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Gym Coach" />
   <title>AI Gym Coach</title>
   <link rel="manifest" href="manifest.json" />
-  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
-  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="icon" href="icons/themes/main-180.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link id="theme-fonts" rel="stylesheet" href="https://fonts.googleapis.com/css2?display=swap&family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600" />
+  <link rel="stylesheet" href="theme.css" />
   <link rel="stylesheet" href="styles.css" />
+  <script src="theme.js"></script>
 </head>
 <body>
   <!-- shared pencil filter for exercise sketches -->
@@ -23,25 +28,19 @@
     </filter>
   </svg>
 
-  <header class="topbar">
-    <h1 id="title">Today</h1>
-  </header>
-
   <main id="view" aria-live="polite"></main>
-
-  <div id="rest" class="rest hidden" role="status">
-    <span>Rest</span><strong id="rest-time">0:00</strong>
-    <button id="rest-skip" class="ghost small">Skip</button>
-  </div>
 
   <div id="toast" class="toast hidden" role="alert"></div>
 
-  <nav class="tabbar hidden">
-    <button data-tab="today" class="active"><span class="ico">🏋️</span>Today</button>
-    <button data-tab="history"><span class="ico">🗓️</span>History</button>
-    <button data-tab="progress"><span class="ico">📈</span>Progress</button>
-    <button data-tab="admin" class="hidden"><span class="ico">🛡️</span>Admin</button>
-    <button data-tab="settings"><span class="ico">⚙️</span>Settings</button>
+  <nav class="tabbar hidden" aria-label="Main">
+    <button class="tab active" data-tab="today">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 10.5 12 3.5l8.5 7"/><path d="M5.5 9v11h13V9"/><path d="M10 20v-6h4v6"/></svg>Today</button>
+    <button class="tab" data-tab="train">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12h2M19.5 12h2M8 12h8"/><rect x="4.5" y="8" width="3.5" height="8" rx="1"/><rect x="16" y="8" width="3.5" height="8" rx="1"/></svg>Train</button>
+    <button class="tab unavail" data-tab="coach" disabled aria-disabled="true" aria-label="Coach, coming soon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c.9 4.6 2.4 6.1 7 7-4.6.9-6.1 2.4-7 7-.9-4.6-2.4-6.1-7-7 4.6-.9 6.1-2.4 7-7Z"/></svg><span>Coach <span class="soon">Soon</span></span></button>
+    <button class="tab" data-tab="progress">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"/><path d="M7 16v-5M12 16V6M17 16v-8"/></svg>Progress</button>
   </nav>
 
   <script src="app.js" type="module"></script>

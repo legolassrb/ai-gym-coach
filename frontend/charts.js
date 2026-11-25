@@ -11,7 +11,7 @@ export const compact = (n) =>
 function niceMax(v) {
   if (!(v > 0)) return 1;
   const p = 10 ** Math.floor(Math.log10(v));
-  return [1, 2, 2.5, 5, 10].map((m) => m * p).find((m) => m >= v);
+  return [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].map((m) => m * p).find((m) => m >= v);
 }
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -29,8 +29,8 @@ function frame(yMax, inner, tips, label) {
     <div class="chart-tip hidden"></div></div>`;
 }
 
-// points: [{ label, value, tip }]
-export function barChart(points, label) {
+// points: [{ label, value, tip }]; highlightLast draws earlier bars muted
+export function barChart(points, label, { highlightLast = false } = {}) {
   const ih = H - M.top - M.bottom;
   const iw = W - M.left - M.right;
   const yMax = niceMax(Math.max(...points.map((p) => p.value || 0)));
@@ -45,9 +45,10 @@ export function barChart(points, label) {
     const r = Math.min(4, h, bw / 2);
     tips.push({ x: cx, text: p.tip });
     const bar = h > 0
-      ? `<path class="bar" data-i="${i}" d="M${x} ${M.top + ih} V${y + r} Q${x} ${y} ${x + r} ${y} H${x + bw - r} Q${x + bw} ${y} ${x + bw} ${y + r} V${M.top + ih} Z"/>`
+      ? `<path class="bar${highlightLast && i < points.length - 1 ? " muted" : ""}" data-i="${i}" d="M${x} ${M.top + ih} V${y + r} Q${x} ${y} ${x + r} ${y} H${x + bw - r} Q${x + bw} ${y} ${x + bw} ${y + r} V${M.top + ih} Z"/>`
       : "";
-    const showLabel = i === 0 || i === points.length - 1 || i % 3 === 0;
+    const every = Math.ceil(points.length / 5);
+    const showLabel = i === points.length - 1 || (i % every === 0 && points.length - 1 - i >= every / 2);
     return `${bar}${showLabel ? `<text class="tick" x="${cx}" y="${H - 6}" text-anchor="middle">${esc(p.label)}</text>` : ""}`;
   });
   return frame(yMax, `<line class="axis" x1="${M.left}" x2="${W - M.right}" y1="${M.top + ih}" y2="${M.top + ih}"/>${bars.join("")}`, tips, label);

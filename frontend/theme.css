@@ -1,0 +1,297 @@
+/* Design tokens. One block per theme flavor; <html data-theme="..."> picks it (default: main).
+   Fonts are loaded per theme by app.js / index.html from Google Fonts. */
+
+:root,
+[data-theme="main"] {
+  --bg: #0E0F11;
+  --surface: #17191C;
+  --surface-2: #23262B;
+  --line: #22252A;
+  --text: #F2F3F5;
+  --muted: #9A9EA6;
+  --accent: #C6F432;
+  --on-accent: #0E0F11;
+  --done: #C6F432;
+  --on-done: #0E0F11;
+  --danger: #FF7A6B;
+  --chart: #C6F432;
+  --chart-muted: #3A3E45;
+
+  --hero-bg: var(--accent);
+  --hero-fg: #0E0F11;
+  --hero-soft: rgba(14, 15, 17, .1);
+  --hero-btn-bg: #0E0F11;
+  --hero-btn-fg: #C6F432;
+  --btn-bg: var(--accent);
+  --btn-fg: var(--on-accent);
+
+  --font-head: "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-label: var(--font-body);
+  --head-weight: 700;
+  --head-case: none;
+  --head-spacing: -0.02em;
+
+  --r-lg: 24px;
+  --r-md: 18px;
+  --r-sm: 12px;
+  --r-btn: 16px;
+  --border: 0 solid transparent;
+  --shadow: none;
+  --tab-bg: rgba(14, 15, 17, .94);
+  --accent-text: #C6F432;   /* accent when used as text/outline on surfaces (contrast-safe) */
+  --tab-active: #C6F432;
+  --tab-active-bg: transparent;
+  color-scheme: dark;
+}
+
+[data-theme="cyber"] {
+  --bg: #08070D;
+  --surface: #12101C;
+  --surface-2: #1B1829;
+  --line: #2B2640;
+  --text: #E8E6F5;
+  --muted: #8F8AAE;
+  --accent: #00F0FF;
+  --on-accent: #08070D;
+  --done: #00F0FF;
+  --on-done: #08070D;
+  --danger: #FF2BD6;
+  --chart: #00F0FF;
+  --chart-muted: #2B2640;
+
+  --hero-bg: #12101C;
+  --hero-fg: #E8E6F5;
+  --hero-soft: rgba(0, 240, 255, .08);
+  --hero-btn-bg: #FCEE0A;
+  --hero-btn-fg: #08070D;
+  --btn-bg: #00F0FF;
+  --btn-fg: #08070D;
+
+  --font-head: "Orbitron", system-ui, sans-serif;
+  --font-body: "Rajdhani", system-ui, sans-serif;
+  --font-label: "Share Tech Mono", ui-monospace, monospace;
+  --head-weight: 700;
+  --head-case: uppercase;
+  --head-spacing: 0.04em;
+
+  --r-lg: 0;
+  --r-md: 0;
+  --r-sm: 0;
+  --r-btn: 0;
+  --border: 1px solid #2B2640;
+  --shadow: none;
+  --tab-bg: rgba(8, 7, 13, .94);
+  --accent-text: #00F0FF;
+  --tab-active: #00F0FF;
+  --tab-active-bg: transparent;
+  color-scheme: dark;
+}
+
+[data-theme="pastel"] {
+  --bg: #F7F4FB;
+  --surface: #FFFFFF;
+  --surface-2: #F0EBF8;
+  --line: #E6DFF2;
+  --text: #2B2540;
+  --muted: #6E6888;
+  --accent: #D9CBFA;
+  --on-accent: #2B2540;
+  --done: #BDECD9;
+  --on-done: #2B2540;
+  --danger: #B3261E;
+  --chart: #7C5CE0;
+  --chart-muted: #E6DFF2;
+
+  --hero-bg: #D9CBFA;
+  --hero-fg: #2B2540;
+  --hero-soft: rgba(255, 255, 255, .55);
+  --hero-btn-bg: #2B2540;
+  --hero-btn-fg: #FFFFFF;
+  --btn-bg: #2B2540;
+  --btn-fg: #FFFFFF;
+
+  --font-head: "Fredoka", system-ui, sans-serif;
+  --font-body: "Nunito", system-ui, sans-serif;
+  --font-label: var(--font-body);
+  --head-weight: 600;
+  --head-case: none;
+  --head-spacing: 0;
+
+  --r-lg: 30px;
+  --r-md: 22px;
+  --r-sm: 16px;
+  --r-btn: 999px;
+  --border: 0 solid transparent;
+  --shadow: 0 8px 24px rgba(43, 37, 64, .08);
+  --tab-bg: #FFFFFF;
+  --accent-text: #5B3FC4;
+  --tab-active: #2B2540;
+  --tab-active-bg: #D9CBFA;
+  color-scheme: light;
+}
+
+[data-theme="forest"] {
+  --bg: #10201A;
+  --surface: #182C24;
+  --surface-2: #213A30;
+  --line: #2C4A3D;
+  --text: #F1EDE2;
+  --muted: #A9B8AE;
+  --accent: #E8C07D;
+  --on-accent: #10201A;
+  --done: #9FD3C7;
+  --on-done: #10201A;
+  --danger: #F2A08B;
+  --chart: #E8C07D;
+  --chart-muted: #2C4A3D;
+
+  --hero-bg: #E8C07D;
+  --hero-fg: #10201A;
+  --hero-soft: rgba(16, 32, 26, .1);
+  --hero-btn-bg: #10201A;
+  --hero-btn-fg: #E8C07D;
+  --btn-bg: #E8C07D;
+  --btn-fg: #10201A;
+
+  --font-head: "DM Serif Display", Georgia, serif;
+  --font-body: "DM Sans", system-ui, sans-serif;
+  --font-label: var(--font-body);
+  --head-weight: 400;
+  --head-case: none;
+  --head-spacing: 0;
+
+  --r-lg: 26px;
+  --r-md: 18px;
+  --r-sm: 12px;
+  --r-btn: 999px;
+  --border: 0 solid transparent;
+  --shadow: none;
+  --tab-bg: rgba(16, 32, 26, .95);
+  --accent-text: #E8C07D;
+  --tab-active: #E8C07D;
+  --tab-active-bg: transparent;
+  color-scheme: dark;
+}
+
+[data-theme="brutal"] {
+  --bg: #FFE14D;
+  --surface: #FFFFFF;
+  --surface-2: #FFF6C2;
+  --line: #111111;
+  --text: #111111;
+  --muted: #3A3A3A;
+  --accent: #FF5C39;
+  --on-accent: #111111;
+  --done: #B8F27C;
+  --on-done: #111111;
+  --danger: #C21F00;
+  --chart: #FF5C39;
+  --chart-muted: #FFF6C2;
+
+  --hero-bg: #FF5C39;
+  --hero-fg: #111111;
+  --hero-soft: rgba(255, 255, 255, .35);
+  --hero-btn-bg: #111111;
+  --hero-btn-fg: #FFE14D;
+  --btn-bg: #111111;
+  --btn-fg: #FFE14D;
+
+  --font-head: "Archivo Black", system-ui, sans-serif;
+  --font-body: "Archivo", system-ui, sans-serif;
+  --font-label: var(--font-body);
+  --head-weight: 400;
+  --head-case: uppercase;
+  --head-spacing: 0;
+
+  --r-lg: 6px;
+  --r-md: 6px;
+  --r-sm: 4px;
+  --r-btn: 4px;
+  --border: 3px solid #111111;
+  --shadow: 5px 5px 0 #111111;
+  --tab-bg: #FFFFFF;
+  --accent-text: #111111;
+  --tab-active: #111111;
+  --tab-active-bg: #FF5C39;
+  color-scheme: light;
+}
+
+[data-theme="frost"] {
+  --bg: #EEF3F7;
+  --surface: #FFFFFF;
+  --surface-2: #E2EAF1;
+  --line: #D3DEE8;
+  --text: #0F2233;
+  --muted: #4F6275;
+  --accent: #2F6BFF;
+  --on-accent: #FFFFFF;
+  --done: #0B7A6A;          /* spec #0E8C7A, darkened for 4.5:1 with white text */
+  --on-done: #FFFFFF;
+  --danger: #C0392B;
+  --chart: #2F6BFF;
+  --chart-muted: #D3DEE8;
+
+  --hero-bg: #2F6BFF;
+  --hero-fg: #FFFFFF;
+  --hero-soft: rgba(255, 255, 255, .16);
+  --hero-btn-bg: #0F2233;
+  --hero-btn-fg: #FFFFFF;
+  --btn-bg: #0F2233;
+  --btn-fg: #FFFFFF;
+
+  --font-head: "Manrope", system-ui, sans-serif;
+  --font-body: "Manrope", system-ui, sans-serif;
+  --font-label: var(--font-body);
+  --head-weight: 800;
+  --head-case: none;
+  --head-spacing: -0.01em;
+
+  --r-lg: 24px;
+  --r-md: 16px;
+  --r-sm: 12px;
+  --r-btn: 14px;
+  --border: 1px solid #D3DEE8;
+  --shadow: 0 6px 20px rgba(15, 34, 51, .06);
+  --tab-bg: #FFFFFF;
+  --accent-text: #2F6BFF;
+  --tab-active: #2F6BFF;
+  --tab-active-bg: transparent;
+  color-scheme: light;
+}
+
+/* ---------- flavor details that aren't plain tokens ---------- */
+
+/* Cyberpunk: grid + scanlines, clipped corners, neon glow, mono labels */
+[data-theme="cyber"] body {
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, .025) 0 1px, transparent 1px 3px),
+    linear-gradient(rgba(0, 240, 255, .05) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(90deg, rgba(0, 240, 255, .05) 1px, transparent 1px) 0 0 / 32px 32px,
+    #08070D;
+}
+[data-theme="cyber"] .hero {
+  border: 1px solid #00F0FF;
+  box-shadow: 0 0 18px rgba(0, 240, 255, .35), inset 0 0 24px rgba(0, 240, 255, .08);
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+}
+[data-theme="cyber"] .hero h2 { color: #00F0FF; text-shadow: 0 0 12px rgba(0, 240, 255, .6); }
+[data-theme="cyber"] .btn-primary,
+[data-theme="cyber"] .hero .btn-hero {
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  text-transform: uppercase; letter-spacing: .08em;
+}
+[data-theme="cyber"] .hero .btn-hero { box-shadow: 0 0 16px rgba(252, 238, 10, .45); }
+[data-theme="cyber"] .tab.active { text-shadow: 0 0 10px rgba(0, 240, 255, .7); }
+[data-theme="cyber"] .label, [data-theme="cyber"] .tile .k, [data-theme="cyber"] .mono { text-transform: uppercase; letter-spacing: .06em; }
+
+/* Pastel: floating pill tab bar */
+[data-theme="pastel"] .tabbar {
+  left: 12px; right: 12px; bottom: calc(10px + var(--safe-bottom));
+  border-radius: 999px; padding: 6px; box-shadow: 0 10px 30px rgba(43, 37, 64, .14);
+}
+
+/* Brutalist: hard shadows on the hero as well, thick dividers */
+[data-theme="brutal"] .hero { border: 3px solid #111; box-shadow: 5px 5px 0 #111; }
+[data-theme="brutal"] .tabbar { border-top: 3px solid #111; }
+[data-theme="brutal"] .btn-primary, [data-theme="brutal"] .btn-hero, [data-theme="brutal"] .btn-ghost { border: 3px solid #111; box-shadow: 3px 3px 0 #111; }
