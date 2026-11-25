@@ -17,10 +17,23 @@ function fakeD1(...files) {
       return { meta: { last_row_id: Number(r.lastInsertRowid), changes: r.changes } };
     },
   });
-  return { db, prepare: (sql) => stmt(sql), batch: async (stmts) => Promise.all(stmts.map((s) => s.run())) };
+  // like D1, a batch is one transaction: any failing statement rolls back the whole batch
+  const batch = async (stmts) => {
+    db.exec("BEGIN");
+    try {
+      const out = [];
+      for (const s of stmts) out.push(await s.run());
+      db.exec("COMMIT");
+      return out;
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  };
+  return { db, prepare: (sql) => stmt(sql), batch };
 }
 
-const MIGRATIONS = ["../migrations/0000_initial.sql", "../migrations/0001_multi_user.sql"];
+const MIGRATIONS = ["../migrations/0000_initial.sql", "../migrations/0001_multi_user.sql", "../migrations/0002_plan_usage.sql"];
 const env = { DB: fakeD1(...MIGRATIONS), APP_PASSPHRASE: "secret", ANTHROPIC_API_KEY: "sk-test", ALLOWED_ORIGINS: "https://x.github.io", PLAN_DAILY_LIMIT: "3" };
 let lastClaudeRequest;
 globalThis.fetch = async (url, init) => {
@@ -152,6 +165,42 @@ assert.equal((await call("POST", "/api/plan", {}, alice)).status, 200);
 assert.equal((await call("POST", "/api/plan", {}, alice)).status, 429);
 for (let i = 0; i < 4; i++) assert.equal((await call("POST", "/api/plan", {}, admin)).status, 200);
 
+// deleting plans doesn't hand back the daily limit
+{
+  const planned = env.DB.db.prepare("SELECT id FROM workouts WHERE user_id = 2 AND status = 'planned'").all();
+  assert.ok(planned.length >= 2);
+  for (const { id } of planned) assert.equal((await call("DELETE", `/api/workouts/${id}`, null, alice)).status, 200);
+  assert.equal((await call("POST", "/api/plan", {}, alice)).status, 429, "limit survives deleting plans");
+}
+
+// a failed Claude call doesn't use up a plan
+{
+  const carol = (await call("POST", "/api/auth/register", { username: "carol", password: "carol-pass-1" })).body.token;
+  const okFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("overloaded", { status: 529 });
+  for (let i = 0; i < 4; i++) assert.equal((await call("POST", "/api/plan", {}, carol)).status, 502);
+  globalThis.fetch = okFetch;
+  for (let i = 0; i < 3; i++) assert.equal((await call("POST", "/api/plan", {}, carol)).status, 200, "failed calls didn't count");
+  assert.equal((await call("POST", "/api/plan", {}, carol)).status, 429);
+}
+
+// saving a workout is atomic: a failure mid-save leaves no completed workout without its sets
+{
+  const realBatch = env.DB.batch;
+  env.DB.batch = (stmts) => realBatch([...stmts, { run: async () => { throw new Error("D1 hiccup"); } }]);
+  const before = (await call("GET", "/api/workouts?limit=200", null, alice)).body.workouts.length;
+  r = await call("POST", "/api/workouts", { date: "2026-11-22", split_day: "legs", exercises: [{ name: "Squat", sets: [{ reps: 5, weight: 100 }] }] }, alice);
+  assert.equal(r.status, 500);
+  // re-completing an existing planned workout rolls back too
+  const { id: plannedId } = env.DB.db.prepare("SELECT id FROM workouts WHERE user_id = 1 AND status = 'planned' LIMIT 1").get();
+  r = await call("POST", "/api/workouts", { id: plannedId, split_day: "push", exercises: [{ name: "Bench Press", sets: [{ reps: 5, weight: 80 }] }] }, admin);
+  assert.equal(r.status, 500);
+  env.DB.batch = realBatch;
+  assert.equal((await call("GET", "/api/workouts?limit=200", null, alice)).body.workouts.length, before, "no half-saved workout in history");
+  assert.equal(env.DB.db.prepare("SELECT status FROM workouts WHERE id = ?").get(plannedId).status, "planned", "update rolled back");
+  assert.equal(env.DB.db.prepare("SELECT COUNT(*) AS n FROM sets s JOIN workouts w ON w.id = s.workout_id WHERE w.status = 'planned'").get().n, 0);
+}
+
 // ---------- progress ----------
 await call("POST", "/api/workouts", { date: "2026-11-24", split_day: "push", exercises: [{ name: "Bench Press", sets: [{ reps: 5, weight: 70 }] }] }, alice);
 r = await call("GET", "/api/progress", null, alice);
@@ -176,7 +225,7 @@ assert.equal((await call("GET", "/api/workouts", null, bob)).body.workouts.lengt
 
 // ---------- admin ----------
 r = await call("GET", "/api/admin/users", null, admin);
-assert.deepEqual(r.body.users.map((u) => [u.username, u.role, u.workouts]), [["boss", "admin", 0], ["alice", "user", 2], ["bob", "user", 0]]);
+assert.deepEqual(r.body.users.map((u) => [u.username, u.role, u.workouts]), [["boss", "admin", 0], ["alice", "user", 2], ["bob", "user", 0], ["carol", "user", 0]]);
 r = await call("GET", "/api/admin/workouts", null, admin);
 assert.equal(r.body.workouts.length, 2);
 assert.equal(r.body.workouts[0].username, "alice");
@@ -206,7 +255,7 @@ assert.equal((await call("GET", "/api/nope", null, alice)).status, 404);
   legacy.db.exec(`INSERT INTO settings (id, data) VALUES (1, '{"split":"upper_lower","units":"lb"}');
     INSERT INTO workouts (date, location, split_day, status) VALUES ('2026-11-01', 'gym', 'upper', 'completed');
     INSERT INTO sets (workout_id, exercise, set_index, reps, weight) VALUES (1, 'Row', 0, 10, 60);`);
-  legacy.db.exec(readFileSync(new URL(MIGRATIONS[1], import.meta.url), "utf8"));
+  for (const m of MIGRATIONS.slice(1)) legacy.db.exec(readFileSync(new URL(m, import.meta.url), "utf8"));
   const saved = env.DB;
   env.DB = legacy;
   const first = (await call("POST", "/api/auth/register", { username: "owner", password: "owner-pass-1", admin_code: "secret" })).body.token;

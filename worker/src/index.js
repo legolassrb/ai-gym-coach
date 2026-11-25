@@ -317,17 +317,6 @@ export async function nextSplitDay(env, userId, settings) {
 
 async function createPlan(env, user, body) {
   if (!env.ANTHROPIC_API_KEY) throw httpError(500, "ANTHROPIC_API_KEY secret is not set");
-  // sign-up is open, so cap Claude calls per user
-  const limit = clampInt(env.PLAN_DAILY_LIMIT, 0, 1000, DEFAULT_PLAN_DAILY_LIMIT);
-  if (user.role !== "admin") {
-    const { n } = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM workouts WHERE user_id = ? AND plan_json IS NOT NULL AND created_at > datetime('now', '-1 day')"
-    )
-      .bind(user.id)
-      .first();
-    if (n >= limit) throw httpError(429, `daily limit of ${limit} plans reached, try again tomorrow`);
-  }
-
   const location = body.location === "home" ? "home" : "gym";
   const minutes = clampInt(body.minutes, 15, 180, 60);
   const date = isIsoDate(body.date) ? body.date : new Date().toISOString().slice(0, 10);
@@ -342,14 +331,23 @@ async function createPlan(env, user, body) {
   const lifts = (await getStats(env, user.id)).slice(0, 40);
 
   const { system, user: prompt } = buildPrompt({ settings, location, minutes, splitDay, userNotes, history, lifts, date });
-  const plan = await callClaude(env, system, prompt);
+  const usageId = await reservePlan(env, user);
+  let plan;
+  try {
+    plan = await callClaude(env, system, prompt);
+  } catch (err) {
+    // a failed Claude call doesn't use up one of the user's daily plans
+    if (usageId) await env.DB.prepare("DELETE FROM plan_usage WHERE id = ?").bind(usageId).run();
+    throw err;
+  }
   plan.location = location;
   plan.split_day = splitDay;
 
-  // drop stale, never-completed plans
-  await env.DB.prepare(
-    "DELETE FROM workouts WHERE status = 'planned' AND created_at < datetime('now', '-3 days')"
-  ).run();
+  // drop stale, never-completed plans and usage rows the daily limit no longer looks at
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM workouts WHERE status = 'planned' AND created_at < datetime('now', '-3 days')"),
+    env.DB.prepare("DELETE FROM plan_usage WHERE created_at < datetime('now', '-2 days')"),
+  ]);
 
   const res = await env.DB.prepare(
     "INSERT INTO workouts (user_id, date, location, split_day, status, plan_json) VALUES (?, ?, ?, ?, 'planned', ?)"
@@ -358,6 +356,22 @@ async function createPlan(env, user, body) {
     .run();
 
   return { id: res.meta.last_row_id, date, plan };
+}
+
+// Sign-up is open, so cap Claude calls per user. Usage lives in its own table: deleting a
+// workout must not give the request back. The row is reserved before the call so parallel
+// requests can't all slip under the limit. Returns the usage row id (null for admins).
+async function reservePlan(env, user) {
+  if (user.role === "admin") return null;
+  const limit = clampInt(env.PLAN_DAILY_LIMIT, 0, 1000, DEFAULT_PLAN_DAILY_LIMIT);
+  const res = await env.DB.prepare(
+    `INSERT INTO plan_usage (user_id)
+       SELECT ?1 WHERE (SELECT COUNT(*) FROM plan_usage WHERE user_id = ?1 AND created_at > datetime('now', '-1 day')) < ?2`
+  )
+    .bind(user.id, limit)
+    .run();
+  if (!res.meta.changes) throw httpError(429, `daily limit of ${limit} plans reached, try again tomorrow`);
+  return res.meta.last_row_id;
 }
 
 export function buildPrompt({ settings, location, minutes, splitDay, userNotes, history, lifts, date }) {
@@ -466,23 +480,24 @@ async function saveWorkout(env, userId, body) {
     const exists = await env.DB.prepare("SELECT id FROM workouts WHERE id = ? AND user_id = ?").bind(id, userId).first();
     if (!exists) id = null;
   }
-  if (id) {
-    await env.DB.prepare(
-      "UPDATE workouts SET date = ?, location = ?, split_day = ?, status = 'completed', notes = ?, duration_min = ? WHERE id = ?"
-    )
-      .bind(date, location, splitDay, notes, duration, id)
-      .run();
-    await env.DB.prepare("DELETE FROM sets WHERE workout_id = ?").bind(id).run();
-  } else {
+  if (!id) {
+    // New workouts start as an empty 'planned' row so the completing batch below has an id.
+    // If that batch fails, the row stays invisible and the stale-plan cleanup removes it.
     const res = await env.DB.prepare(
-      "INSERT INTO workouts (user_id, date, location, split_day, status, notes, duration_min) VALUES (?, ?, ?, ?, 'completed', ?, ?)"
+      "INSERT INTO workouts (user_id, date, location, split_day, status) VALUES (?, ?, ?, ?, 'planned')"
     )
-      .bind(userId, date, location, splitDay, notes, duration)
+      .bind(userId, date, location, splitDay)
       .run();
     id = res.meta.last_row_id;
   }
 
-  const stmts = [];
+  // One batch = one transaction: the workout is never left completed with missing sets.
+  const stmts = [
+    env.DB.prepare(
+      "UPDATE workouts SET date = ?, location = ?, split_day = ?, status = 'completed', notes = ?, duration_min = ? WHERE id = ?"
+    ).bind(date, location, splitDay, notes, duration, id),
+    env.DB.prepare("DELETE FROM sets WHERE workout_id = ?").bind(id),
+  ];
   for (const ex of exercises.slice(0, 40)) {
     const name = String(ex.name ?? "").trim().slice(0, 100);
     if (!name || !Array.isArray(ex.sets)) continue;
@@ -494,7 +509,7 @@ async function saveWorkout(env, userId, body) {
       );
     });
   }
-  if (stmts.length) await env.DB.batch(stmts);
+  await env.DB.batch(stmts);
   return getWorkout(env, id);
 }
 
