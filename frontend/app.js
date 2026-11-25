@@ -209,8 +209,9 @@ function renderLogin() {
       <div><label class="label" for="auth-user">Username</label><input id="auth-user" autocomplete="username" autocapitalize="off" required /></div>
       <div><label class="label" for="auth-pass">Password</label><input id="auth-pass" type="password" autocomplete="${reg ? "new-password" : "current-password"}" required minlength="${reg ? 8 : 1}" />
         ${reg ? '<div class="muted" style="margin-top:4px">At least 8 characters.</div>' : ""}</div>
-      ${reg ? `<details class="plain"><summary class="muted">I have an admin code ${ICON.chevron("sm")}</summary>
-        <input id="auth-code" type="password" placeholder="Admin code" autocomplete="off" aria-label="Admin code" /></details>` : ""}
+      ${reg ? `<details class="plain" id="auth-code-box"><summary class="muted">I have an admin code ${ICON.chevron("sm")}</summary>
+        <!-- text, not password: iOS fills every password field in the form with the new password -->
+        <input id="auth-code" type="text" class="masked" placeholder="Admin code" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Admin code" /></details>` : ""}
       <details class="plain"><summary class="muted">Server ${ICON.chevron("sm")}</summary>
         <input id="auth-url" type="url" placeholder="${esc(DEFAULT_API_URL)}" value="${esc(getCfg().apiUrl)}" autocapitalize="off" aria-label="Server URL" /></details>
       <button class="btn-primary" type="submit" ${state.busy ? "disabled" : ""}>
@@ -223,7 +224,8 @@ async function submitAuth() {
   save(CFG_KEY, { apiUrl: v("auth-url").trim() });
   const reg = state.authMode === "register";
   const body = { username: v("auth-user").trim(), password: v("auth-pass") };
-  if (reg && v("auth-code")) body.admin_code = v("auth-code");
+  const code = v("auth-code").trim();
+  if (reg && code && document.getElementById("auth-code-box")?.open) body.admin_code = code;
   state.busy = true;
   renderLogin();
   try {
